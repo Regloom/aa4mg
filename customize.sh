@@ -82,21 +82,58 @@ else
     SKIPPED_APPS="${SKIPPED_APPS}Google Speech Services stub"
 fi
 
-# Request if Fake Google Search stub dependency should be installed
-ui_print ""
-ui_print "*** Install Fake Google Search stub? ***"
-ui_print "(a.k.a. com.google.android.googlequicksearchbox)"
-ui_print ""
-if chooseport 30 "NO"; then # 0 = True, why shell why..
-    ui_print "Fake Google Search stub will be installed on next reboot!"
-    [ -n "$INSTALLED_APPS" ] && INSTALLED_APPS="$INSTALLED_APPS,"
-    INSTALLED_APPS="${INSTALLED_APPS}Google Search stub"
+# Google app (com.google.android.googlequicksearchbox): either a system copy of the installed real app, or the fake
+# stub. The fake stub is signed by SolidHal: next to the real app (signed by Google) the package manager finds a
+# signature mismatch at boot and deletes the real app from /data, so the stub is offered only without the real app.
+# A system copy signed by Google instead turns the installed app into an updated system app, which is granted the
+# privileged permissions of privapp-permissions-velvet.xml (hotword on the DSP: MANAGE_SOUND_TRIGGER and others).
+VELVET_DIR="$MODPATH/system/product/priv-app/Velvet"
+VELVET_XML="$MODPATH/system/product/etc/permissions/privapp-permissions-velvet.xml"
+GSA_PKG=com.google.android.googlequicksearchbox
+GSA_APK=$(/system/bin/pm path "$GSA_PKG" 2>/dev/null | sed -n 's|^package:\(/data/app/.*/base\.apk\)$|\1|p' | head -n 1)
+VELVET_MODE=none
+if [ -n "$GSA_APK" ] && [ -f "$GSA_APK" ]; then
+    ui_print ""
+    ui_print "*** Install the installed Google app as a system app? ***"
+    ui_print "(for 'Hey Google' on the hotword DSP; copies the app, about 250 MB)"
+    ui_print "The fake Google Search stub is not offered: it would delete the installed Google app."
+    ui_print ""
+    if chooseport 30 "NO"; then # 0 = True, why shell why..
+        rm -f "$VELVET_DIR/Velvet.apk"
+        if ! cp "$GSA_APK" "$VELVET_DIR/Velvet.apk"; then
+            abort "! Could not copy the Google app (not enough space?)"
+        fi
+        GSA_SUM=$(sha256sum < "$GSA_APK"); VELVET_SUM=$(sha256sum < "$VELVET_DIR/Velvet.apk")
+        [ "${GSA_SUM%% *}" = "${VELVET_SUM%% *}" ] || abort "! The copy of the Google app is damaged"
+        VELVET_MODE=real
+        ui_print "The Google app will be a system app on next reboot!"
+        [ -n "$INSTALLED_APPS" ] && INSTALLED_APPS="$INSTALLED_APPS,"
+        INSTALLED_APPS="${INSTALLED_APPS}Google app as system app"
+    else
+        ui_print "The Google app stays a normal app..."
+        [ -n "$SKIPPED_APPS" ] && SKIPPED_APPS="$SKIPPED_APPS,"
+        SKIPPED_APPS="${SKIPPED_APPS}Google app as system app"
+    fi
 else
-    rm -r "$MODPATH/system/product/priv-app/Velvet";
-    ui_print "Excluded Fake Google Search stub from installation..."
-    [ -n "$SKIPPED_APPS" ] && SKIPPED_APPS="$SKIPPED_APPS,"
-    SKIPPED_APPS="${SKIPPED_APPS}Google Search stub"
+    ui_print ""
+    ui_print "*** Install Fake Google Search stub? ***"
+    ui_print "(a.k.a. com.google.android.googlequicksearchbox)"
+    ui_print ""
+    if chooseport 30 "NO"; then # 0 = True, why shell why..
+        VELVET_MODE=stub
+        ui_print "Fake Google Search stub will be installed on next reboot!"
+        [ -n "$INSTALLED_APPS" ] && INSTALLED_APPS="$INSTALLED_APPS,"
+        INSTALLED_APPS="${INSTALLED_APPS}Google Search stub"
+    else
+        ui_print "Excluded Fake Google Search stub from installation..."
+        [ -n "$SKIPPED_APPS" ] && SKIPPED_APPS="$SKIPPED_APPS,"
+        SKIPPED_APPS="${SKIPPED_APPS}Google Search stub"
+    fi
 fi
+[ "$VELVET_MODE" = none ] && rm -r "$VELVET_DIR"
+[ "$VELVET_MODE" = real ] || rm -f "$VELVET_XML"
+# Read by action.sh: only a system copy of the real app has updates that must be uninstalled before removal
+echo "$VELVET_MODE" > "$MODPATH/velvet_mode"
 
 # Ask for Android Auto - XLauncher Unlocked
 ui_print ""
